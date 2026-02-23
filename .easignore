@@ -1,0 +1,29 @@
+# Zips enormes que tienes en el repo
+*.zip
+*.7z
+*.rar
+
+# Monorepo: NO se necesita para construir la app
+/backend
+/web
+
+# Root deps (en tu repo hay EntreMaletas/node_modules)
+node_modules
+**/node_modules
+
+# Expo caches
+**/.expo
+**/.expo-shared
+
+# Caches/builds
+**/.cache
+**/dist
+**/build
+**/.turbo
+**/.next
+
+# Logs / OS / editor
+**/*.log
+.DS_Store
+Thumbs.db
+.vscode

@@ -1,0 +1,34 @@
+# dependencies
+node_modules/
+**/node_modules/
+
+# expo
+.expo/
+**/.expo/
+.expo-shared/
+**/.expo-shared/
+
+# builds
+dist/
+build/
+.cache/
+.turbo/
+.next/
+
+# env
+.env
+**/.env
+
+# logs
+*.log
+
+# zips
+*.zip
+*.7z
+*.rar
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+node_modules
