@@ -1,18 +1,22 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useContext, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api";
 
 const AuthCtx = createContext(null);
 
+function normEmail(email) {
+  return String(email || "").trim().toLowerCase();
+}
+function normUsername(username) {
+  return String(username || "").trim();
+}
+function normPassword(password) {
+  return String(password || "");
+}
+
 export function AuthProvider({ children }) {
-  // ✅ SIEMPRE inicia cerrado (no leer localStorage)
+  // memoria (no persiste)
   const [token, setToken] = useState("");
   const [user, setUser] = useState(null);
-
-  useEffect(() => {
-    // ✅ por si quedó algo viejo guardado
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-  }, []);
 
   const value = useMemo(() => {
     return {
@@ -23,7 +27,10 @@ export function AuthProvider({ children }) {
       async login(email, password) {
         const data = await apiFetch("/auth/login", {
           method: "POST",
-          body: JSON.stringify({ email, password }),
+          body: JSON.stringify({
+            email: normEmail(email),
+            password: normPassword(password),
+          }),
         });
         setToken(data.token);
         setUser(data.user);
@@ -32,7 +39,11 @@ export function AuthProvider({ children }) {
       async register(username, email, password) {
         const data = await apiFetch("/auth/register", {
           method: "POST",
-          body: JSON.stringify({ username, email, password }),
+          body: JSON.stringify({
+            username: normUsername(username),
+            email: normEmail(email),
+            password: normPassword(password),
+          }),
         });
         setToken(data.token);
         setUser(data.user);
@@ -41,8 +52,6 @@ export function AuthProvider({ children }) {
       logout() {
         setToken("");
         setUser(null);
-        localStorage.removeItem("token");
-        localStorage.removeItem("user");
       },
     };
   }, [token, user]);

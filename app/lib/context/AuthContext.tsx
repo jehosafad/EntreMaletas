@@ -39,15 +39,26 @@ function safeJsonParse(s: string | null) {
   }
 }
 
+// ✅ Normalización (robustez)
+function normEmail(email: string) {
+  return String(email || "").trim().toLowerCase();
+}
+function normUsername(username: string) {
+  return String(username || "").trim();
+}
+function normPassword(password: string) {
+  return String(password || "");
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [apiBase, _setApiBase] = useState(sanitizeApiBase(DEFAULT_API_BASE) || DEFAULT_API_BASE);
+  const [apiBase, _setApiBase] = useState(sanitizeApiBase(ENV_API_BASE || DEFAULT_API_BASE) || DEFAULT_API_BASE);
   const [token, setToken] = useState("");
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
     (async () => {
       const envProvided = !!ENV_API_BASE; // si hay .env, preferimos SIEMPRE ese valor
-      const envBase = sanitizeApiBase(DEFAULT_API_BASE);
+      const envBase = sanitizeApiBase(ENV_API_BASE || DEFAULT_API_BASE);
 
       const storedRaw = await AsyncStorage.getItem("apiBase");
       const storedBase = sanitizeApiBase(storedRaw || "");
@@ -91,12 +102,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const r = await fetch(`${apiBase}/auth/login`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password }),
+          body: JSON.stringify({
+            email: normEmail(email),
+            password: normPassword(password),
+          }),
         });
+
         if (!r.ok) throw new Error(await r.text());
+
         const data = await r.json();
         setToken(data.token);
         setUser(data.user);
+
         await AsyncStorage.setItem("token", data.token);
         await AsyncStorage.setItem("user", JSON.stringify(data.user));
       },
@@ -105,12 +122,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const r = await fetch(`${apiBase}/auth/register`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username, email, password }),
+          body: JSON.stringify({
+            username: normUsername(username),
+            email: normEmail(email),
+            password: normPassword(password),
+          }),
         });
+
         if (!r.ok) throw new Error(await r.text());
+
         const data = await r.json();
         setToken(data.token);
         setUser(data.user);
+
         await AsyncStorage.setItem("token", data.token);
         await AsyncStorage.setItem("user", JSON.stringify(data.user));
       },
