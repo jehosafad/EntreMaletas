@@ -25,6 +25,8 @@ export default function Register() {
       <input
         className="input"
         type="password"
+        minLength={8}
+        placeholder="Mínimo 8 caracteres"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
       />
