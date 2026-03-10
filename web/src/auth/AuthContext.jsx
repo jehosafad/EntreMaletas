@@ -14,15 +14,17 @@ function normPassword(password) {
 }
 
 export function AuthProvider({ children }) {
-  // memoria (no persiste)
   const [token, setToken] = useState("");
   const [user, setUser] = useState(null);
 
   const value = useMemo(() => {
+    const isAdmin = user?.role === "admin";
+
     return {
       token,
       user,
       isAuthed: !!token,
+      isAdmin,
 
       async login(email, password) {
         const data = await apiFetch("/auth/login", {
@@ -32,6 +34,7 @@ export function AuthProvider({ children }) {
             password: normPassword(password),
           }),
         });
+
         setToken(data.token);
         setUser(data.user);
       },
@@ -45,6 +48,7 @@ export function AuthProvider({ children }) {
             password: normPassword(password),
           }),
         });
+
         setToken(data.token);
         setUser(data.user);
       },

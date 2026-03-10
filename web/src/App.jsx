@@ -8,7 +8,7 @@ import Panel from "./pages/Panel";
 import { useAuth } from "./auth/AuthContext";
 
 function Layout() {
-  const { isAuthed, user, logout } = useAuth();
+  const { isAuthed, isAdmin, user, logout } = useAuth();
   const loc = useLocation();
 
   return (
@@ -28,9 +28,13 @@ function Layout() {
             {isAuthed ? (
               <>
                 <Link className="navLink" to="/panel">
-                  Mis viajes
+                  {isAdmin ? "Panel admin" : "Mis viajes"}
                 </Link>
-                <span className="pill">@{user?.username}</span>
+
+                <span className="pill">
+                  {isAdmin ? "admin" : "user"} · @{user?.username}
+                </span>
+
                 <button className="btn ghost" onClick={() => logout()}>
                   Salir
                 </button>

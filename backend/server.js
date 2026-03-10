@@ -86,7 +86,7 @@ if (!MONGO_URI) {
 
 // ✅ Defensa Mongoose contra selector injection
 mongoose.set("sanitizeFilter", true);
-mongoose.set("strictQuery", true); // recomendado
+mongoose.set("strictQuery", true);
 
 mongoose
   .connect(MONGO_URI)
@@ -130,25 +130,22 @@ function mustBeObjectId(field, value) {
 
 function mustBeSlug(value) {
   const slug = mustBeString("slug", value, { min: 1, max: 120 });
-  // slugify strict=true genera algo compatible con esto
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) throw new HttpError(400, "slug inválido");
   return slug;
 }
 
 function getBaseUrl(req) {
-  // 1) si lo fijas en env para producción
   if (BASE_URL_ENV) return BASE_URL_ENV;
 
-  // 2) si viene detrás de proxy (Render)
   const proto = (req.headers["x-forwarded-proto"] || req.protocol || "http")
     .toString()
     .split(",")[0]
     .trim();
+
   const host = (req.headers["x-forwarded-host"] || req.get("host") || "").toString().trim();
 
   if (host) return `${proto}://${host}`;
 
-  // 3) fallback
   return `http://localhost:${PORT}`;
 }
 
@@ -173,28 +170,26 @@ function makeDedupeHash({ authorId, titulo, lugar, resumen, contenido }) {
     normalizeText(resumen),
     normalizeText(contenido),
   ].join("|");
+
   return crypto.createHash("sha256").update(payload).digest("hex");
 }
 
-// Convierte fotoUrl absoluta -> relativa si es de /seed_images o /uploads
 function toRelativeFotoUrl(url) {
   if (!url) return "";
-  // ya es relativa
   if (url.startsWith("/seed_images") || url.startsWith("/uploads")) return url;
 
-  // URL absoluta
   try {
     const u = new URL(url);
     if (u.pathname.startsWith("/seed_images") || u.pathname.startsWith("/uploads")) return u.pathname;
   } catch {
     // ignore
   }
-  return url; // fallback: no tocamos si es algo externo
+
+  return url;
 }
 
 function normalizeViajeForClient(v, req) {
   const base = getBaseUrl(req);
-
   const rel = toRelativeFotoUrl(v.fotoUrl || "") || "";
   const { dedupeHash, ...safe } = v;
 
@@ -212,11 +207,17 @@ const userSchema = new mongoose.Schema(
   {
     username: { type: String, required: true, unique: true, trim: true },
     email: { type: String, required: true, unique: true, trim: true, lowercase: true },
-    // ✅ evita leaks accidentales
     passwordHash: { type: String, required: true, select: false },
+    role: {
+      type: String,
+      enum: ["user", "admin"],
+      default: "user",
+      index: true,
+    },
   },
   { timestamps: true, versionKey: false }
 );
+
 const User = mongoose.model("User", userSchema);
 
 // ===== MODELO VIAJE
@@ -228,7 +229,7 @@ const viajeSchema = new mongoose.Schema(
     contenido: { type: String, default: "" },
     descripcion: { type: String, default: "" },
     fecha: { type: Date, default: Date.now },
-    fotoUrl: { type: String, default: "" }, // /uploads/... o /seed_images/...
+    fotoUrl: { type: String, default: "" },
     slug: { type: String, required: true, unique: true, index: true },
     dedupeHash: { type: String, index: true },
     author: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
@@ -236,24 +237,41 @@ const viajeSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Índice único "sparse" para no romper documentos antiguos sin dedupeHash
 viajeSchema.index({ author: 1, dedupeHash: 1 }, { unique: true, sparse: true });
 
 const Viaje = mongoose.model("Viaje", viajeSchema);
 
 // ===== Auth middleware
-function authRequired(req, res, next) {
+async function authRequired(req, res, next) {
   const h = req.headers.authorization || "";
   const token = h.startsWith("Bearer ") ? h.slice(7) : "";
+
   if (!token) return next(new HttpError(401, "No token"));
 
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-    req.userId = payload.userId;
+
+    const user = await User.findById(payload.userId)
+      .select("_id username email role")
+      .lean();
+
+    if (!user) return next(new HttpError(401, "Usuario no existe"));
+
+    req.userId = String(user._id);
+    req.userRole = user.role || "user";
+    req.user = user;
+
     return next();
   } catch {
     return next(new HttpError(401, "Token inválido"));
   }
+}
+
+function requireAdmin(req, res, next) {
+  if (req.userRole !== "admin") {
+    return next(new HttpError(403, "Solo admin"));
+  }
+  return next();
 }
 
 // ===== Multer + Static
@@ -262,7 +280,6 @@ if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
 const seedImagesDir = path.join(__dirname, "seed_images");
 
-// sirve estáticos (si existen)
 app.use("/uploads", express.static(uploadsDir));
 if (fs.existsSync(seedImagesDir)) app.use("/seed_images", express.static(seedImagesDir));
 
@@ -274,10 +291,9 @@ const storage = multer.diskStorage({
   },
 });
 
-// ✅ hardening uploads: tamaño + tipo
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     if (!/^image\/(png|jpe?g|webp)$/i.test(file.mimetype)) {
       return cb(new HttpError(400, "Tipo de archivo inválido"));
@@ -289,7 +305,6 @@ const upload = multer({
 // ===== Routes
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
-// Auth rate limit
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
@@ -308,15 +323,30 @@ app.post("/auth/register", authLimiter, async (req, res, next) => {
     if (exists) return res.status(409).json({ error: "Usuario o email ya existe" });
 
     const passwordHash = await bcrypt.hash(password, 10);
-    const user = await User.create({ username, email, passwordHash });
+
+    const user = await User.create({
+      username,
+      email,
+      passwordHash,
+      role: "user",
+    });
 
     const token = jwt.sign({ userId: user._id.toString() }, JWT_SECRET, { expiresIn: "7d" });
+
     return res.json({
       token,
-      user: { _id: user._id, id: user._id, username: user.username, email: user.email },
+      user: {
+        _id: user._id,
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+      },
     });
   } catch (e) {
-    if (e && e.code === 11000) return res.status(409).json({ error: "Usuario o email ya existe" });
+    if (e && e.code === 11000) {
+      return res.status(409).json({ error: "Usuario o email ya existe" });
+    }
     return next(e);
   }
 });
@@ -326,8 +356,7 @@ app.post("/auth/login", authLimiter, async (req, res, next) => {
     const email = mustBeEmail(req.body?.email);
     const password = mustBeString("password", req.body?.password, { min: 8, max: 128 });
 
-    // ✅ passwordHash está select:false, así que lo pedimos explícito
-    const user = await User.findOne({ email }).select("+passwordHash");
+    const user = await User.findOne({ email }).select("+passwordHash username email role");
     if (!user) return res.status(401).json({ error: "Credenciales inválidas" });
 
     const ok = await bcrypt.compare(password, user.passwordHash);
@@ -335,10 +364,31 @@ app.post("/auth/login", authLimiter, async (req, res, next) => {
 
     const token = jwt.sign({ userId: user._id.toString() }, JWT_SECRET, { expiresIn: "7d" });
 
-    // no devuelvas passwordHash
     return res.json({
       token,
-      user: { _id: user._id, id: user._id, username: user.username, email: user.email },
+      user: {
+        _id: user._id,
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        role: user.role || "user",
+      },
+    });
+  } catch (e) {
+    return next(e);
+  }
+});
+
+app.get("/auth/me", authRequired, async (req, res, next) => {
+  try {
+    return res.json({
+      user: {
+        _id: req.user._id,
+        id: req.user._id,
+        username: req.user.username,
+        email: req.user.email,
+        role: req.user.role,
+      },
     });
   } catch (e) {
     return next(e);
@@ -349,7 +399,6 @@ app.post("/auth/login", authLimiter, async (req, res, next) => {
 app.get("/viajes", async (req, res, next) => {
   try {
     const viajes = await Viaje.find({})
-      // ✅ no filtrar email
       .populate("author", "username")
       .sort({ createdAt: -1 })
       .lean();
@@ -374,8 +423,7 @@ app.get("/viajes/slug/:slug", async (req, res, next) => {
   }
 });
 
-// ===== Crear viaje (protegida, multipart, foto opcional)
-// ✅ IMPORTANTE: mongoSanitize después de multer para form-data
+// ===== Crear viaje
 app.post(
   "/viajes",
   authRequired,
@@ -383,7 +431,6 @@ app.post(
   mongoSanitize({ replaceWith: "_" }),
   async (req, res, next) => {
     try {
-      // valida tipos (string-only)
       const titulo = mustBeString("titulo", req.body?.titulo, { min: 1, max: 120 });
       const lugar = mustBeString("lugar", req.body?.lugar, { min: 1, max: 80 });
 
@@ -391,7 +438,6 @@ app.post(
       const contenidoIn = optionalString("contenido", req.body?.contenido, { max: 5000 });
       const descripcionIn = optionalString("descripcion", req.body?.descripcion, { max: 5000 });
 
-      // compat legacy: si mandan descripcion en vez de resumen+contenido
       const finalResumen = resumenIn || descripcionIn;
       const finalContenido = contenidoIn || descripcionIn;
 
@@ -439,7 +485,7 @@ app.post(
   }
 );
 
-// ===== Editar (protegida, solo autor)
+// ===== Editar (autor o admin)
 app.put(
   "/viajes/:id",
   authRequired,
@@ -452,18 +498,43 @@ app.put(
       const v = await Viaje.findById(id);
       if (!v) return res.status(404).json({ error: "No encontrado" });
 
-      if (!v.author || v.author.toString() !== req.userId) {
+      const ownerId = v.author ? v.author.toString() : "";
+      const isOwner = ownerId === req.userId;
+      const isAdmin = req.userRole === "admin";
+
+      if (!isOwner && !isAdmin) {
         return res.status(403).json({ error: "No permitido" });
       }
 
-      const titulo = req.body?.titulo !== undefined ? mustBeString("titulo", req.body.titulo, { min: 1, max: 120 }) : "";
-      const lugar = req.body?.lugar !== undefined ? mustBeString("lugar", req.body.lugar, { min: 1, max: 80 }) : "";
+      const titulo =
+        req.body?.titulo !== undefined
+          ? mustBeString("titulo", req.body.titulo, { min: 1, max: 120 })
+          : "";
 
-      const resumen = req.body?.resumen !== undefined ? optionalString("resumen", req.body.resumen, { max: 500 }) : "";
-      const contenido = req.body?.contenido !== undefined ? optionalString("contenido", req.body.contenido, { max: 5000 }) : "";
-      const descripcion = req.body?.descripcion !== undefined ? optionalString("descripcion", req.body.descripcion, { max: 5000 }) : "";
+      const lugar =
+        req.body?.lugar !== undefined
+          ? mustBeString("lugar", req.body.lugar, { min: 1, max: 80 })
+          : "";
 
-      const fotoUrlRaw = req.body?.fotoUrl !== undefined ? optionalString("fotoUrl", req.body.fotoUrl, { max: 2000 }) : "";
+      const resumen =
+        req.body?.resumen !== undefined
+          ? optionalString("resumen", req.body.resumen, { max: 500 })
+          : "";
+
+      const contenido =
+        req.body?.contenido !== undefined
+          ? optionalString("contenido", req.body.contenido, { max: 5000 })
+          : "";
+
+      const descripcion =
+        req.body?.descripcion !== undefined
+          ? optionalString("descripcion", req.body.descripcion, { max: 5000 })
+          : "";
+
+      const fotoUrlRaw =
+        req.body?.fotoUrl !== undefined
+          ? optionalString("fotoUrl", req.body.fotoUrl, { max: 2000 })
+          : "";
 
       if (titulo) v.titulo = titulo;
 
@@ -476,7 +547,6 @@ app.put(
       if (req.body?.contenido !== undefined) v.contenido = contenido;
       if (req.body?.descripcion !== undefined) v.descripcion = descripcion;
 
-      // compat legacy
       if (req.body?.resumen === undefined && descripcion) v.resumen = descripcion;
       if (req.body?.contenido === undefined && descripcion) v.contenido = descripcion;
 
@@ -486,14 +556,18 @@ app.put(
       if (titulo) v.slug = makeSlugUnique(titulo);
 
       const nextHash = makeDedupeHash({
-        authorId: req.userId,
+        authorId: ownerId,
         titulo: v.titulo,
         lugar: v.lugar,
         resumen: v.resumen,
         contenido: v.contenido,
       });
 
-      const dupe = await Viaje.findOne({ author: req.userId, dedupeHash: nextHash, _id: { $ne: v._id } })
+      const dupe = await Viaje.findOne({
+        author: ownerId,
+        dedupeHash: nextHash,
+        _id: { $ne: v._id },
+      })
         .select("_id")
         .lean();
 
@@ -512,7 +586,7 @@ app.put(
   }
 );
 
-// ===== Borrar (protegida, solo autor)
+// ===== Borrar (autor o admin)
 app.delete("/viajes/:id", authRequired, async (req, res, next) => {
   try {
     const id = mustBeObjectId("id", req.params.id);
@@ -520,7 +594,13 @@ app.delete("/viajes/:id", authRequired, async (req, res, next) => {
     const v = await Viaje.findById(id);
     if (!v) return res.status(404).json({ error: "No encontrado" });
 
-    if (!v.author || v.author.toString() !== req.userId) return res.status(403).json({ error: "No permitido" });
+    const ownerId = v.author ? v.author.toString() : "";
+    const isOwner = ownerId === req.userId;
+    const isAdmin = req.userRole === "admin";
+
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ error: "No permitido" });
+    }
 
     await v.deleteOne();
     return res.json({ ok: true });
@@ -529,7 +609,95 @@ app.delete("/viajes/:id", authRequired, async (req, res, next) => {
   }
 });
 
-// ===== Global error handler (no filtra detalles internos)
+// ===== ADMIN: listar usuarios
+app.get("/admin/users", authRequired, requireAdmin, async (_req, res, next) => {
+  try {
+    const users = await User.find({})
+      .select("_id username email role createdAt updatedAt")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.json(
+      users.map((u) => ({
+        _id: u._id,
+        id: u._id,
+        username: u.username,
+        email: u.email,
+        role: u.role || "user",
+        createdAt: u.createdAt,
+        updatedAt: u.updatedAt,
+      }))
+    );
+  } catch (e) {
+    return next(e);
+  }
+});
+
+// ===== ADMIN: cambiar rol
+app.patch("/admin/users/:id/role", authRequired, requireAdmin, async (req, res, next) => {
+  try {
+    const id = mustBeObjectId("id", req.params.id);
+    const role = mustBeString("role", req.body?.role, { min: 4, max: 5 }).toLowerCase();
+
+    if (!["user", "admin"].includes(role)) {
+      throw new HttpError(400, "role inválido");
+    }
+
+    if (id === req.userId && role !== "admin") {
+      throw new HttpError(400, "No puedes quitarte el rol admin a ti mismo");
+    }
+
+    const user = await User.findByIdAndUpdate(
+      id,
+      { $set: { role } },
+      { new: true, runValidators: true }
+    )
+      .select("_id username email role")
+      .lean();
+
+    if (!user) return res.status(404).json({ error: "Usuario no encontrado" });
+
+    return res.json({
+      ok: true,
+      user: {
+        _id: user._id,
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+      },
+    });
+  } catch (e) {
+    return next(e);
+  }
+});
+
+// ===== ADMIN: borrar usuario y sus viajes
+app.delete("/admin/users/:id", authRequired, requireAdmin, async (req, res, next) => {
+  try {
+    const id = mustBeObjectId("id", req.params.id);
+
+    if (id === req.userId) {
+      throw new HttpError(400, "No puedes borrarte a ti mismo");
+    }
+
+    const user = await User.findById(id).select("_id role username email").lean();
+    if (!user) return res.status(404).json({ error: "Usuario no encontrado" });
+
+    if (user.role === "admin") {
+      throw new HttpError(400, "No puedes borrar otro admin");
+    }
+
+    await Viaje.deleteMany({ author: user._id });
+    await User.deleteOne({ _id: user._id });
+
+    return res.json({ ok: true });
+  } catch (e) {
+    return next(e);
+  }
+});
+
+// ===== Global error handler
 app.use((err, _req, res, _next) => {
   const status = Number(err?.status) || (err?.name === "CastError" ? 400 : 500);
 

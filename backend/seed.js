@@ -12,9 +12,15 @@ const MONGO_URI = process.env.MONGO_URI;
 
 const userSchema = new mongoose.Schema(
   {
-    username: { type: String, unique: true },
-    email: { type: String, unique: true },
-    passwordHash: String,
+    username: { type: String, unique: true, trim: true },
+    email: { type: String, unique: true, trim: true, lowercase: true },
+    passwordHash: { type: String, required: true },
+    role: {
+      type: String,
+      enum: ["user", "admin"],
+      default: "user",
+      index: true,
+    },
   },
   { timestamps: true, versionKey: false }
 );
@@ -35,7 +41,7 @@ const viajeSchema = new mongoose.Schema(
   { versionKey: false }
 );
 
-// ✅ Evita "viajes exactamente iguales" por autor+contenido (sparse para no romper docs antiguos)
+// Evita viajes exactamente iguales por autor+contenido
 viajeSchema.index({ author: 1, dedupeHash: 1 }, { unique: true, sparse: true });
 
 const User = mongoose.model("User", userSchema);
@@ -56,6 +62,7 @@ function makeDedupeHash({ authorId, titulo, lugar, resumen, contenido }) {
     normalizeText(resumen),
     normalizeText(contenido),
   ].join("|");
+
   return crypto.createHash("sha256").update(payload).digest("hex");
 }
 
@@ -70,22 +77,40 @@ async function main() {
   await mongoose.connect(MONGO_URI);
   console.log("✅ Conectado para seed");
 
-  // Usuario "system" (no expone credenciales)
-  // - se crea si no existe
-  // - contraseña aleatoria NO se imprime
+  // Usuario "system"
   const email = "system@entremaletas.local";
   let systemUser = await User.findOne({ email });
 
   if (!systemUser) {
     const randomPass = crypto.randomBytes(24).toString("hex");
     const passwordHash = await bcrypt.hash(randomPass, 10);
-    systemUser = await User.create({ username: "system", email, passwordHash });
+
+    systemUser = await User.create({
+      username: "system",
+      email,
+      passwordHash,
+      role: "user",
+    });
+
     console.log("✅ Usuario system creado (password aleatoria no mostrada)");
   } else {
-    console.log("ℹ️ Usuario system ya existe");
+    // Si ya existía de antes y no tenía role correcto, lo corregimos
+    let changed = false;
+
+    if (systemUser.role !== "user") {
+      systemUser.role = "user";
+      changed = true;
+    }
+
+    if (changed) {
+      await systemUser.save();
+      console.log('ℹ️ Usuario system actualizado con role="user"');
+    } else {
+      console.log("ℹ️ Usuario system ya existe");
+    }
   }
 
-  // ✅ borra solo seeds del usuario system (no toca viajes reales de otros usuarios)
+  // Borra solo seeds del usuario system
   await Viaje.deleteMany({
     author: systemUser._id,
     fotoUrl: { $regex: "^/seed_images/" },
@@ -145,14 +170,12 @@ async function main() {
         contenido: v.contenido,
       }),
       fecha: now,
-      descripcion: v.contenido, // legacy por si tu UI usa "descripcion"
+      descripcion: v.contenido,
     };
   });
 
-  // ✅ Asegura creación de índices antes de insertar
   await Viaje.createIndexes();
 
-  // ✅ Inserta tolerando duplicados puntuales (no detiene todo el batch)
   const inserted = await Viaje.insertMany(viajesSeed, { ordered: false });
   console.log("✅ Seed insertado:", inserted.length);
 
