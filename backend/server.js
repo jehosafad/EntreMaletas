@@ -498,9 +498,10 @@ app.put(
       const v = await Viaje.findById(id);
       if (!v) return res.status(404).json({ error: "No encontrado" });
 
-      const ownerId = v.author ? v.author.toString() : "";
-      const isOwner = ownerId === req.userId;
-      const isAdmin = req.userRole === "admin";
+      const rawOwnerId = v.author ? String(v.author) : "";
+const ownerId = mongoose.isValidObjectId(rawOwnerId) ? rawOwnerId : "";
+const isOwner = ownerId === req.userId;
+const isAdmin = req.userRole === "admin";
 
       if (!isOwner && !isAdmin) {
         return res.status(403).json({ error: "No permitido" });
@@ -555,16 +556,22 @@ app.put(
 
       if (titulo) v.slug = makeSlugUnique(titulo);
 
-      const nextHash = makeDedupeHash({
-        authorId: ownerId,
-        titulo: v.titulo,
-        lugar: v.lugar,
-        resumen: v.resumen,
-        contenido: v.contenido,
-      });
+      const dedupeAuthorId = ownerId || req.userId;
 
-      const dupe = await Viaje.findOne({
-  author: ownerId,
+if (!ownerId && isAdmin) {
+  v.author = req.userId;
+}
+
+const nextHash = makeDedupeHash({
+  authorId: dedupeAuthorId,
+  titulo: v.titulo,
+  lugar: v.lugar,
+  resumen: v.resumen,
+  contenido: v.contenido,
+});
+
+const dupe = await Viaje.findOne({
+  author: dedupeAuthorId,
   dedupeHash: nextHash,
   _id: mongoose.trusted({ $ne: v._id }),
 })
