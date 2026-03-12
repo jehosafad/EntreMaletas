@@ -564,12 +564,12 @@ app.put(
       });
 
       const dupe = await Viaje.findOne({
-        author: ownerId,
-        dedupeHash: nextHash,
-        _id: { $ne: v._id },
-      })
-        .select("_id")
-        .lean();
+  author: ownerId,
+  dedupeHash: nextHash,
+  _id: mongoose.trusted({ $ne: v._id }),
+})
+  .select("_id")
+  .lean();
 
       if (dupe) return res.status(409).json({ error: "Ya existe un viaje igual" });
 
