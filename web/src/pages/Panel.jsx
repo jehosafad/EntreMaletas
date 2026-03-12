@@ -29,6 +29,7 @@ export default function Panel() {
   const [saving, setSaving] = useState(false);
 
   const inFlight = useRef(false);
+  const editorRef = useRef(null);
 
   async function loadViajes() {
     const data = await apiFetch("/viajes");
@@ -51,6 +52,12 @@ export default function Panel() {
   useEffect(() => {
     loadUsers().catch((e) => setErr(String(e.message || e)));
   }, [isAdmin, token]);
+
+  useEffect(() => {
+    if (editing && editorRef.current) {
+      editorRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [editing]);
 
   const mine = useMemo(() => {
     const myId = user?._id;
@@ -123,6 +130,11 @@ export default function Panel() {
 
       await apiFetch(`/viajes/${v._id}`, { method: "DELETE", token });
       await loadViajes();
+
+      if (editing?._id === v._id) {
+        setEditing(null);
+      }
+
       setFlash("Borrado ✅");
       setTimeout(() => setFlash(""), 2000);
     } catch (e) {
@@ -163,6 +175,12 @@ export default function Panel() {
     }
   }
 
+  function startEdit(v) {
+    setEditing(v);
+    setFlash("");
+    setErr("");
+  }
+
   return (
     <div className="stack">
       <h1 className="h1">{isAdmin ? "Panel de administración" : "Panel"}</h1>
@@ -175,22 +193,22 @@ export default function Panel() {
 
       {err && <p className="muted">Error: {err}</p>}
 
-      <Editor
-        key={editing?._id || "new"}
-        initial={editing}
-        saving={saving}
-        onSave={save}
-        onCancel={() => setEditing(null)}
-      />
+      <div ref={editorRef}>
+        <Editor
+          key={editing?._id || "new"}
+          initial={editing}
+          saving={saving}
+          onSave={save}
+          onCancel={() => setEditing(null)}
+        />
+      </div>
 
       <div className="row space">
         <h2 className="h2" style={{ margin: 0 }}>
           {isAdmin ? "Todas las publicaciones" : "Mis viajes"}
         </h2>
 
-        {isAdmin ? (
-          <span className="pill">Acciones exclusivas de admin</span>
-        ) : null}
+        {isAdmin ? <span className="pill">Acciones exclusivas de admin</span> : null}
       </div>
 
       {visibleViajes.length === 0 ? (
@@ -199,32 +217,44 @@ export default function Panel() {
         </p>
       ) : (
         <div className="grid">
-          {visibleViajes.map((v) => (
-            <div className="card" key={v._id} style={{ cursor: "default" }}>
-              <img src={v.fotoUrl} alt={v.titulo} />
-              <div className="p">
-                <h3 className="h2">{v.titulo}</h3>
+          {visibleViajes.map((v) => {
+            const isEditingThis = editing?._id === v._id;
 
-                <div className="muted">
-                  {v.lugar ? `${v.lugar} · ` : ""}
-                  {new Date(v.fecha).toLocaleDateString()}
-                  {isAdmin ? ` · autor: ${v.author?.username || "—"}` : ""}
-                </div>
+            return (
+              <div
+                className="card"
+                key={v._id}
+                style={{
+                  cursor: "default",
+                  outline: isEditingThis ? "2px solid #111" : "none",
+                  outlineOffset: "2px",
+                }}
+              >
+                <img src={v.fotoUrl} alt={v.titulo} />
+                <div className="p">
+                  <h3 className="h2">{v.titulo}</h3>
 
-                <p className="snippet">{v.resumen || v.descripcion || ""}</p>
+                  <div className="muted">
+                    {v.lugar ? `${v.lugar} · ` : ""}
+                    {new Date(v.fecha).toLocaleDateString()}
+                    {isAdmin ? ` · autor: ${v.author?.username || "—"}` : ""}
+                  </div>
 
-                <div className="row">
-                  <button className="btn ghost" onClick={() => setEditing(v)} disabled={saving}>
-                    Editar
-                  </button>
+                  <p className="snippet">{v.resumen || v.descripcion || ""}</p>
 
-                  <button className="btn danger" onClick={() => removeViaje(v)} disabled={saving}>
-                    Borrar
-                  </button>
+                  <div className="row">
+                    <button className="btn ghost" onClick={() => startEdit(v)} disabled={saving}>
+                      {isEditingThis ? "Editando..." : "Editar"}
+                    </button>
+
+                    <button className="btn danger" onClick={() => removeViaje(v)} disabled={saving}>
+                      Borrar
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -298,9 +328,16 @@ function Editor({ initial, saving, onSave, onCancel }) {
   return (
     <div className="panelCard">
       <div className="row space">
-        <h2 className="h2" style={{ margin: 0 }}>
-          {isEdit ? "Editar viaje" : "Nuevo viaje"}
-        </h2>
+        <div>
+          <h2 className="h2" style={{ margin: 0 }}>
+            {isEdit ? "Editar viaje" : "Nuevo viaje"}
+          </h2>
+          {isEdit ? (
+            <div className="muted" style={{ marginTop: 6 }}>
+              Editando: <strong>{initial?.titulo}</strong>
+            </div>
+          ) : null}
+        </div>
 
         {isEdit ? (
           <button className="btn ghost" onClick={onCancel} disabled={saving}>
@@ -341,7 +378,7 @@ function Editor({ initial, saving, onSave, onCancel }) {
         onClick={() => onSave({ titulo, lugar, descripcion, fotoFile })}
         disabled={saving}
       >
-        {saving ? "Guardando…" : "Guardar"}
+        {saving ? "Guardando…" : isEdit ? "Guardar cambios" : "Guardar"}
       </button>
     </div>
   );

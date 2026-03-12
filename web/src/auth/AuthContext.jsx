@@ -1,7 +1,10 @@
-import React, { createContext, useContext, useMemo, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api";
 
 const AuthCtx = createContext(null);
+
+const TOKEN_KEY = "token";
+const USER_KEY = "user";
 
 function normEmail(email) {
   return String(email || "").trim().toLowerCase();
@@ -13,9 +16,55 @@ function normPassword(password) {
   return String(password || "");
 }
 
+function readStoredAuth() {
+  try {
+    const token = localStorage.getItem(TOKEN_KEY) || "";
+    const rawUser = localStorage.getItem(USER_KEY) || "";
+    const user = rawUser ? JSON.parse(rawUser) : null;
+    return { token, user };
+  } catch {
+    return { token: "", user: null };
+  }
+}
+
+function writeStoredAuth(token, user) {
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+
+    if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
+    else localStorage.removeItem(USER_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 export function AuthProvider({ children }) {
-  const [token, setToken] = useState("");
-  const [user, setUser] = useState(null);
+  const [token, setToken] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return readStoredAuth().token;
+  });
+
+  const [user, setUser] = useState(() => {
+    if (typeof window === "undefined") return null;
+    return readStoredAuth().user;
+  });
+
+  useEffect(() => {
+    writeStoredAuth(token, user);
+  }, [token, user]);
+
+  useEffect(() => {
+    function onStorage(e) {
+      if (e.key !== TOKEN_KEY && e.key !== USER_KEY) return;
+      const next = readStoredAuth();
+      setToken(next.token);
+      setUser(next.user);
+    }
+
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   const value = useMemo(() => {
     const isAdmin = user?.role === "admin";
@@ -35,8 +84,9 @@ export function AuthProvider({ children }) {
           }),
         });
 
-        setToken(data.token);
-        setUser(data.user);
+        setToken(data.token || "");
+        setUser(data.user || null);
+        writeStoredAuth(data.token || "", data.user || null);
       },
 
       async register(username, email, password) {
@@ -49,13 +99,15 @@ export function AuthProvider({ children }) {
           }),
         });
 
-        setToken(data.token);
-        setUser(data.user);
+        setToken(data.token || "");
+        setUser(data.user || null);
+        writeStoredAuth(data.token || "", data.user || null);
       },
 
       logout() {
         setToken("");
         setUser(null);
+        writeStoredAuth("", null);
       },
     };
   }, [token, user]);
