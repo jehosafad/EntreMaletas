@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Alert, Button, StyleSheet, TextInput, View } from "react-native";
+import { Alert, Pressable, StyleSheet, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
 
 import { ThemedText } from "@/components/themed-text";
@@ -7,9 +7,45 @@ import { ThemedView } from "@/components/themed-view";
 import { useAuth } from "@/lib/context/AuthContext";
 import { DEFAULT_API_BASE } from "@/lib/config";
 
+function ActionButton({
+  title,
+  onPress,
+  variant = "solid",
+  disabled = false,
+}: {
+  title: string;
+  onPress: () => void | Promise<void>;
+  variant?: "solid" | "ghost" | "danger";
+  disabled?: boolean;
+}) {
+  return (
+    <Pressable
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.btn,
+        variant === "solid" && styles.btnSolid,
+        variant === "ghost" && styles.btnGhost,
+        variant === "danger" && styles.btnDanger,
+        disabled && styles.btnDisabled,
+        pressed && !disabled && { opacity: 0.9 },
+      ]}
+    >
+      <ThemedText
+        style={[
+          styles.btnText,
+          variant === "ghost" ? styles.btnGhostText : styles.btnSolidText,
+        ]}
+      >
+        {title}
+      </ThemedText>
+    </Pressable>
+  );
+}
+
 export default function Cuenta() {
   const router = useRouter();
-  const { apiBase, setApiBase, isAuthed, user, login, register, logout } = useAuth();
+  const { apiBase, setApiBase, isAuthed, isAdmin, user, login, register, logout } = useAuth();
 
   const [base, setBase] = useState(apiBase);
   const [mode, setMode] = useState<"login" | "register">("login");
@@ -43,22 +79,23 @@ export default function Cuenta() {
       />
 
       <View style={styles.row}>
-        <Button
+        <ActionButton
           title="Guardar API Base"
           onPress={async () => {
             try {
               await setApiBase(base);
-              Alert.alert("Listo", "API base guardada ✅");
+              Alert.alert("Listo", "API base guardada");
             } catch (e: any) {
               Alert.alert("Error", String(e.message || e));
             }
           }}
         />
-        <Button title="Probar /health" onPress={testHealth} />
+        <ActionButton title="Probar /health" variant="ghost" onPress={testHealth} />
       </View>
 
-      <Button
+      <ActionButton
         title="Restablecer a DEFAULT"
+        variant="ghost"
         onPress={async () => {
           await setApiBase(DEFAULT_API_BASE);
           setBase(DEFAULT_API_BASE);
@@ -71,15 +108,27 @@ export default function Cuenta() {
       {isAuthed ? (
         <>
           <ThemedText type="subtitle">@{user?.username}</ThemedText>
-          <Button title="Crear nuevo viaje" onPress={() => router.push("/nuevo-viaje")} />
+          <ThemedText style={styles.roleText}>
+            Rol: {isAdmin ? "admin" : user?.role || "user"}
+          </ThemedText>
+
+          <ActionButton title="Crear nuevo viaje" onPress={() => router.push("/nuevo-viaje")} />
+
+          {isAdmin ? (
+            <>
+              <View style={{ height: 10 }} />
+              <ActionButton title="Abrir panel admin" onPress={() => router.push("/panel-admin")} />
+            </>
+          ) : null}
+
           <View style={{ height: 10 }} />
-          <Button title="Salir" onPress={logout} />
+          <ActionButton title="Salir" variant="danger" onPress={logout} />
         </>
       ) : (
         <>
           <View style={styles.row}>
-            <Button title="Login" onPress={() => setMode("login")} />
-            <Button title="Registro" onPress={() => setMode("register")} />
+            <ActionButton title="Login" onPress={() => setMode("login")} />
+            <ActionButton title="Registro" variant="ghost" onPress={() => setMode("register")} />
           </View>
 
           {mode === "register" ? (
@@ -90,18 +139,28 @@ export default function Cuenta() {
           ) : null}
 
           <ThemedText style={styles.label}>Email</ThemedText>
-          <TextInput value={email} onChangeText={setEmail} style={styles.input} autoCapitalize="none" />
+          <TextInput
+            value={email}
+            onChangeText={setEmail}
+            style={styles.input}
+            autoCapitalize="none"
+          />
 
           <ThemedText style={styles.label}>Password</ThemedText>
-          <TextInput value={password} onChangeText={setPassword} style={styles.input} secureTextEntry />
+          <TextInput
+            value={password}
+            onChangeText={setPassword}
+            style={styles.input}
+            secureTextEntry
+          />
 
-          <Button
+          <ActionButton
             title={mode === "login" ? "Entrar" : "Crear cuenta"}
             onPress={async () => {
               try {
                 if (mode === "login") await login(email, password);
                 else await register(username, email, password);
-                Alert.alert("Listo", "Sesión iniciada ✅");
+                Alert.alert("Listo", "Sesión iniciada");
               } catch (e: any) {
                 Alert.alert("Error", String(e.message || e));
               }
@@ -116,6 +175,38 @@ export default function Cuenta() {
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16, gap: 12 },
   label: { opacity: 0.7 },
-  input: { borderWidth: 1, borderRadius: 10, padding: 12 },
+  roleText: { opacity: 0.8, fontWeight: "700" },
+  input: { borderWidth: 1, borderRadius: 12, padding: 12 },
   row: { flexDirection: "row", gap: 10, justifyContent: "space-between" },
+  btn: {
+    minHeight: 46,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    flex: 1,
+  },
+  btnSolid: {
+    backgroundColor: "#111111",
+  },
+  btnGhost: {
+    borderWidth: 1,
+    borderColor: "#111111",
+    backgroundColor: "transparent",
+  },
+  btnDanger: {
+    backgroundColor: "#111111",
+  },
+  btnDisabled: {
+    opacity: 0.6,
+  },
+  btnText: {
+    fontWeight: "700",
+  },
+  btnSolidText: {
+    color: "#FFFFFF",
+  },
+  btnGhostText: {
+    color: "#111111",
+  },
 });

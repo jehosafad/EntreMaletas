@@ -2,7 +2,13 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from "
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { DEFAULT_API_BASE, ENV_API_BASE } from "@/lib/config";
 
-type User = { _id?: string; id?: string; username: string; email: string };
+type User = {
+  _id?: string;
+  id?: string;
+  username: string;
+  email: string;
+  role?: "user" | "admin";
+};
 
 type Ctx = {
   apiBase: string;
@@ -10,6 +16,7 @@ type Ctx = {
   token: string;
   user: User | null;
   isAuthed: boolean;
+  isAdmin: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (username: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -20,18 +27,16 @@ const AuthCtx = createContext<Ctx | null>(null);
 function sanitizeApiBase(raw: string) {
   let s = String(raw || "").trim();
   if (!s) return "";
-  // si el usuario pone "192.168.1.26:3000" sin http, lo arreglamos
   if (!/^https?:\/\//i.test(s)) s = `http://${s}`;
   s = s.replace(/\/+$/, "");
   return s;
 }
 
 function isBadBase(base: string) {
-  // hosts típicos que NO sirven en móvil físico
   return /\/\/(localhost|127\.0\.0\.1|10\.0\.2\.2)(:|\/|$)/i.test(base);
 }
 
-function safeJsonParse(s: string | null) {
+function safeJsonParse<T = any>(s: string | null): T | null {
   try {
     return s ? JSON.parse(s) : null;
   } catch {
@@ -39,7 +44,6 @@ function safeJsonParse(s: string | null) {
   }
 }
 
-// ✅ Normalización (robustez)
 function normEmail(email: string) {
   return String(email || "").trim().toLowerCase();
 }
@@ -50,22 +54,40 @@ function normPassword(password: string) {
   return String(password || "");
 }
 
+async function readApiError(resp: Response) {
+  const ct = resp.headers.get("content-type") || "";
+  try {
+    if (ct.includes("application/json")) {
+      const j: any = await resp.json();
+      return j?.error || j?.message || JSON.stringify(j);
+    }
+    const t = await resp.text();
+    try {
+      const j = JSON.parse(t);
+      return j?.error || j?.message || t;
+    } catch {
+      return t;
+    }
+  } catch {
+    return `HTTP ${resp.status}`;
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [apiBase, _setApiBase] = useState(sanitizeApiBase(ENV_API_BASE || DEFAULT_API_BASE) || DEFAULT_API_BASE);
+  const [apiBase, _setApiBase] = useState(
+    sanitizeApiBase(ENV_API_BASE || DEFAULT_API_BASE) || DEFAULT_API_BASE
+  );
   const [token, setToken] = useState("");
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
     (async () => {
-      const envProvided = !!ENV_API_BASE; // si hay .env, preferimos SIEMPRE ese valor
+      const envProvided = !!ENV_API_BASE;
       const envBase = sanitizeApiBase(ENV_API_BASE || DEFAULT_API_BASE);
 
       const storedRaw = await AsyncStorage.getItem("apiBase");
       const storedBase = sanitizeApiBase(storedRaw || "");
 
-      // ✅ Regla:
-      // - Si hay ENV_API_BASE => usarlo (y pisa lo guardado)
-      // - Si NO hay ENV_API_BASE => usar lo guardado SOLO si no es localhost-like
       let finalBase = envBase;
 
       if (!envProvided && storedBase && !isBadBase(storedBase)) {
@@ -77,8 +99,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const t = await AsyncStorage.getItem("token");
       const u = await AsyncStorage.getItem("user");
+
       if (t) setToken(t);
-      const parsed = safeJsonParse(u);
+
+      const parsed = safeJsonParse<User>(u);
       if (parsed) setUser(parsed);
     })();
   }, []);
@@ -97,6 +121,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       token,
       user,
       isAuthed: !!token,
+      isAdmin: user?.role === "admin",
 
       async login(email, password) {
         const r = await fetch(`${apiBase}/auth/login`, {
@@ -108,14 +133,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }),
         });
 
-        if (!r.ok) throw new Error(await r.text());
+        if (!r.ok) throw new Error(await readApiError(r));
 
         const data = await r.json();
-        setToken(data.token);
-        setUser(data.user);
+        setToken(data.token || "");
+        setUser(data.user || null);
 
-        await AsyncStorage.setItem("token", data.token);
-        await AsyncStorage.setItem("user", JSON.stringify(data.user));
+        await AsyncStorage.setItem("token", data.token || "");
+        await AsyncStorage.setItem("user", JSON.stringify(data.user || null));
       },
 
       async register(username, email, password) {
@@ -129,14 +154,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }),
         });
 
-        if (!r.ok) throw new Error(await r.text());
+        if (!r.ok) throw new Error(await readApiError(r));
 
         const data = await r.json();
-        setToken(data.token);
-        setUser(data.user);
+        setToken(data.token || "");
+        setUser(data.user || null);
 
-        await AsyncStorage.setItem("token", data.token);
-        await AsyncStorage.setItem("user", JSON.stringify(data.user));
+        await AsyncStorage.setItem("token", data.token || "");
+        await AsyncStorage.setItem("user", JSON.stringify(data.user || null));
       },
 
       async logout() {
