@@ -90,19 +90,34 @@ export default function Panel() {
       fd.append("lugar", cleanLugar);
       fd.append("descripcion", cleanDesc);
 
-      if (form.fotoFile) fd.append("foto", form.fotoFile);
-      else fd.append("fotoUrl", seedFotoFromLugar(cleanLugar));
-
       const isEdit = Boolean(editing && editing._id);
 
+      if (form.fotoFile) {
+        fd.append("foto", form.fotoFile);
+      } else if (!isEdit) {
+        // Solo en creación nueva, si no eligieron foto, usamos una seed.
+        // En edición NO mandamos fotoUrl para conservar la imagen actual.
+        fd.append("fotoUrl", seedFotoFromLugar(cleanLugar));
+      }
+
       if (isEdit) {
-        await apiFetch(`/viajes/${editing._id}`, { method: "PUT", body: fd, token });
+        await apiFetch(`/viajes/${editing._id}`, {
+          method: "PUT",
+          body: fd,
+          token,
+        });
+
         setFlash("Guardado ✅");
         setEditing(null);
         await loadViajes();
         setTimeout(() => setFlash(""), 2000);
       } else {
-        await apiFetch(`/viajes`, { method: "POST", body: fd, token });
+        await apiFetch(`/viajes`, {
+          method: "POST",
+          body: fd,
+          token,
+        });
+
         setFlash("Guardado ✅. Redirigiendo a Descubrir…");
         setEditing(null);
         await loadViajes();
