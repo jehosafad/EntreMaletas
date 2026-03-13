@@ -94,9 +94,13 @@ export default function Panel() {
 
       if (form.fotoFile) {
         fd.append("foto", form.fotoFile);
-      } else if (!isEdit) {
+      } else if (isEdit) {
+        // En edición, si NO eligieron foto nueva, conservamos la foto actual.
+        if (editing?.fotoUrl) {
+          fd.append("fotoUrl", editing.fotoUrl);
+        }
+      } else {
         // Solo en creación nueva, si no eligieron foto, usamos una seed.
-        // En edición NO mandamos fotoUrl para conservar la imagen actual.
         fd.append("fotoUrl", seedFotoFromLugar(cleanLugar));
       }
 
